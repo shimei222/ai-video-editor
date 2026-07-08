@@ -1,0 +1,17 @@
+{
+  "name": "ai-director-master",
+  "version": "1.0.0",
+  "description": "AI导演大师 - 让每个人都能用AI拍出电影级视频",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "npx serve -l 8080",
+    "build": "echo '无需构建，直接部署'"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "serve": "^14.2.1"
+  }
+}
