@@ -15,11 +15,8 @@ class TTSManager {
         
         // 自动检测后端服务器是否可用
         this._serverAvailable = false;
-        this._checkServerAvailable().then(() => {
-            if (this._serverAvailable) {
-                this._loadVoicesFromServer(true);
-            }
-        });
+        this._serverCheckCompleted = false;
+        this._serverCheckPromise = this._checkServerAvailable();
 
         this.providers = {
             webspeech: {
@@ -63,7 +60,7 @@ class TTSManager {
             try {
                 const response = await fetch(`${serverUrl}/api/voices`, {
                     method: 'GET',
-                    signal: AbortSignal.timeout(3000),
+                    signal: AbortSignal.timeout(8000),
                     headers: {
                         'Accept': 'application/json'
                     },
@@ -75,6 +72,8 @@ class TTSManager {
                     this.localServerUrl = serverUrl;
                     this.currentProvider = 'edgetts';
                     console.log(`[TTS] ${name}可用:`, serverUrl);
+                    this._serverCheckCompleted = true;
+                    this._loadVoicesFromServer(true);
                     return;
                 }
             } catch (e) {
@@ -84,6 +83,7 @@ class TTSManager {
 
         // 所有服务器都不可用
         this._serverAvailable = false;
+        this._serverCheckCompleted = true;
         console.log('[TTS] 所有后端服务器都不可用，使用浏览器原生语音');
     }
 
@@ -163,6 +163,16 @@ class TTSManager {
     async _loadVoicesFromServer(force = false) {
         if (!force && (this._voicesLoading || this._voicesLoaded)) return;
         if (this._voicesLoading) return;
+
+        if (!this._serverCheckCompleted) {
+            await this._serverCheckPromise;
+        }
+
+        if (!this._serverAvailable) {
+            console.log('[TTS] 后端服务器不可用，跳过加载音色列表');
+            return;
+        }
+
         this._voicesLoading = true;
         try {
             const response = await fetch(`${this.localServerUrl}/api/voices`, {
