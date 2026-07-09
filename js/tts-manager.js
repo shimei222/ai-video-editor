@@ -58,8 +58,13 @@ class TTSManager {
                     method: 'GET',
                     signal: AbortSignal.timeout(3000),
                     headers: {
-                        'Date': this._getDateHeader()
-                    }
+                        'Date': new Date().toUTCString(),
+                        'Content-Type': 'application/json',
+                        'Accept': '*/*',
+                        'User-Agent': navigator.userAgent
+                    },
+                    cache: 'no-cache',
+                    mode: 'cors'
                 });
                 if (response.ok) {
                     this._serverAvailable = true;
@@ -155,9 +160,15 @@ class TTSManager {
         this._voicesLoading = true;
         try {
             const response = await fetch(`${this.localServerUrl}/api/voices`, {
+                method: 'GET',
                 headers: {
-                    'Date': this._getDateHeader()
-                }
+                    'Date': new Date().toUTCString(),
+                    'Content-Type': 'application/json',
+                    'Accept': '*/*',
+                    'User-Agent': navigator.userAgent
+                },
+                cache: 'no-cache',
+                mode: 'cors'
             });
             if (!response.ok) throw new Error('获取音色列表失败');
             const data = await response.json();
@@ -496,7 +507,9 @@ class TTSManager {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Date': this._getDateHeader()
+                'Date': new Date().toUTCString(),
+                'Accept': '*/*',
+                'User-Agent': navigator.userAgent
             },
             body: JSON.stringify({
                 text: text,
@@ -504,7 +517,9 @@ class TTSManager {
                 rate: rateStr,
                 pitch: pitchStr,
                 volume: volumeStr
-            })
+            }),
+            cache: 'no-cache',
+            mode: 'cors'
         });
 
         if (!response.ok) {
