@@ -51,37 +51,42 @@ class TTSManager {
 
     // 检测后端服务器是否可用
     async _checkServerAvailable() {
-        // 优先尝试本地服务器（localhost:3000），再尝试远程服务器
         const servers = [
-            { url: this.localServerUrl, name: '本地服务器' },
-            { url: this.remoteServerUrl, name: '远程服务器' }
+            { url: this.remoteServerUrl, name: '远程服务器', retries: 3 },
+            { url: this.localServerUrl, name: '本地服务器', retries: 1 }
         ];
-        for (const { url: serverUrl, name } of servers) {
-            try {
-                const response = await fetch(`${serverUrl}/api/voices`, {
-                    method: 'GET',
-                    signal: AbortSignal.timeout(8000),
-                    headers: {
-                        'Accept': 'application/json'
-                    },
-                    cache: 'no-cache',
-                    mode: 'cors'
-                });
-                if (response.ok) {
-                    this._serverAvailable = true;
-                    this.localServerUrl = serverUrl;
-                    this.currentProvider = 'edgetts';
-                    console.log(`[TTS] ${name}可用:`, serverUrl);
-                    this._serverCheckCompleted = true;
-                    this._loadVoicesFromServer(true);
-                    return;
+
+        for (const { url: serverUrl, name, retries } of servers) {
+            for (let attempt = 1; attempt <= retries; attempt++) {
+                try {
+                    console.log(`[TTS] 检测${name} (第${attempt}次)...`);
+                    const response = await fetch(`${serverUrl}/api/voices`, {
+                        method: 'GET',
+                        signal: AbortSignal.timeout(8000),
+                        headers: {
+                            'Accept': 'application/json'
+                        },
+                        cache: 'no-cache',
+                        mode: 'cors'
+                    });
+                    if (response.ok) {
+                        this._serverAvailable = true;
+                        this.localServerUrl = serverUrl;
+                        this.currentProvider = 'edgetts';
+                        console.log(`[TTS] ${name}可用:`, serverUrl);
+                        this._serverCheckCompleted = true;
+                        this._loadVoicesFromServer(true);
+                        return;
+                    }
+                } catch (e) {
+                    console.log(`[TTS] ${name}不可用 (第${attempt}次):`, serverUrl, e.message);
+                    if (attempt < retries) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
                 }
-            } catch (e) {
-                console.log(`[TTS] ${name}不可用:`, serverUrl, e.message);
             }
         }
 
-        // 所有服务器都不可用
         this._serverAvailable = false;
         this._serverCheckCompleted = true;
         console.log('[TTS] 所有后端服务器都不可用，使用浏览器原生语音');
@@ -500,51 +505,66 @@ class TTSManager {
      */
     async _synthesizeViaLocalServer(text, voice, rateStr, pitchStr, volumeStr) {
         const url = `${this.localServerUrl}/api/tts`;
+        const maxRetries = 2;
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Date': new Date().toUTCString(),
-                    'Accept': '*/*',
-                    'User-Agent': navigator.userAgent
-                },
-                body: JSON.stringify({
-                    text: text,
-                    voice: voice,
-                    rate: rateStr,
-                    pitch: pitchStr,
-                    volume: volumeStr
-                }),
-                cache: 'no-cache',
-                mode: 'cors',
-                signal: controller.signal
-            });
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Date': new Date().toUTCString(),
+                        'Accept': '*/*',
+                        'User-Agent': navigator.userAgent
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        voice: voice,
+                        rate: rateStr,
+                        pitch: pitchStr,
+                        volume: volumeStr
+                    }),
+                    cache: 'no-cache',
+                    mode: 'cors',
+                    signal: controller.signal
+                });
 
-            if (!response.ok) {
-                const errText = await response.text().catch(() => '未知错误');
-                if (response.status === 0 || response.status === 404) {
-                    throw new Error('本地后端服务器未启动。请先运行: cd tts-server && npm install && npm start');
+                if (!response.ok) {
+                    const errText = await response.text().catch(() => '未知错误');
+                    if (response.status === 0 || response.status === 404) {
+                        throw new Error('本地后端服务器未启动。请先运行: cd tts-server && npm install && npm start');
+                    }
+                    if (response.status === 502 || response.status === 504) {
+                        if (attempt < maxRetries) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            continue;
+                        }
+                        throw new Error('当前音色暂时不可用，请换一个音色试试');
+                    }
+                    throw new Error(`后端服务器错误 (${response.status}): ${errText}`);
                 }
-                if (response.status === 502 || response.status === 504) {
-                    throw new Error(`当前音色暂时不可用，请换一个音色试试`);
-                }
-                throw new Error(`后端服务器错误 (${response.status}): ${errText}`);
-            }
 
-            const arrayBuffer = await response.arrayBuffer();
-            return new Blob([arrayBuffer], { type: 'audio/mpeg' });
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                throw new Error('请求超时，当前音色暂时不可用，请换一个音色试试');
+                const arrayBuffer = await response.arrayBuffer();
+                return new Blob([arrayBuffer], { type: 'audio/mpeg' });
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    if (attempt < maxRetries) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        continue;
+                    }
+                    throw new Error('请求超时，当前音色暂时不可用，请换一个音色试试');
+                }
+                if (attempt < maxRetries && !err.message.includes('本地后端服务器未启动')) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    continue;
+                }
+                throw err;
+            } finally {
+                clearTimeout(timeoutId);
             }
-            throw err;
-        } finally {
-            clearTimeout(timeoutId);
         }
     }
 
