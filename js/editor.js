@@ -3039,6 +3039,11 @@ class VideoEditor {
                         errMsg.includes('verify that your parameters are correct') ||
                         errMsg.includes('语音合成失败')) {
                         this.showToast('暂无这个音色，试试其他音色吧', 'warning');
+                    } else if (errMsg.includes('超时') || 
+                               errMsg.includes('暂时不可用') ||
+                               errMsg.includes('502') ||
+                               errMsg.includes('504')) {
+                        this.showToast('当前音色暂时不可用，请换一个音色试试，或请使用国内网络', 'warning');
                     } else {
                         this.showToast('试听失败: ' + errMsg, 'error');
                     }
@@ -3389,10 +3394,14 @@ class VideoEditor {
                 const isVoiceError = errMsg.includes('No audio was received') ||
                     errMsg.includes('verify that your parameters are correct') ||
                     errMsg.includes('未收到音频数据') ||
-                    errMsg.includes('语音合成失败');
+                    errMsg.includes('语音合成失败') ||
+                    errMsg.includes('超时') ||
+                    errMsg.includes('暂时不可用') ||
+                    errMsg.includes('502') ||
+                    errMsg.includes('504');
 
                 if (isVoiceError) {
-                    this.showToast('当前音色暂不可用，请更换其他音色后重试', 'warning');
+                    this.showToast('当前音色暂不可用，请更换其他音色后重试，或请使用国内网络', 'warning');
                 } else {
                     this.showToast('音色测试失败: ' + (err.message || err), 'error');
                 }

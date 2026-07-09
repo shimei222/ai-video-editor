@@ -8,14 +8,18 @@
 class TTSManager {
     constructor() {
         // 后端服务器地址
-        // 优先从环境变量读取，用于线上部署1111
+        // 本地开发时使用 localhost:3000，线上部署时通过 window.TTS_SERVER_URL 设置
         const envUrl = window.TTS_SERVER_URL || '';
-        this.localServerUrl = envUrl || 'https://web-tts-trigger-srwwkcpbhf.cn-shanghai.fcapp.run';
-        this.remoteServerUrl = this.localServerUrl;
+        this.localServerUrl = 'http://localhost:3000';
+        this.remoteServerUrl = envUrl || 'https://web-tts-trigger-srwwkcpbhf.cn-shanghai.fcapp.run';
         
         // 自动检测后端服务器是否可用
         this._serverAvailable = false;
-        this._checkServerAvailable();
+        this._checkServerAvailable().then(() => {
+            if (this._serverAvailable) {
+                this._loadVoicesFromServer(true);
+            }
+        });
 
         this.providers = {
             webspeech: {
@@ -41,7 +45,6 @@ class TTSManager {
         this._initWebSpeechVoices();
         this._initEdgeTTSVoices();
         this._loadFromStorage();
-        this._loadVoicesFromServer();
     }
     
     // 生成 RFC 1123 格式的 Date 头部
@@ -51,32 +54,35 @@ class TTSManager {
 
     // 检测后端服务器是否可用
     async _checkServerAvailable() {
-        const servers = [this.localServerUrl, this.remoteServerUrl];
-        for (const serverUrl of servers) {
+        // 优先尝试本地服务器（localhost:3000），再尝试远程服务器
+        const servers = [
+            { url: this.localServerUrl, name: '本地服务器' },
+            { url: this.remoteServerUrl, name: '远程服务器' }
+        ];
+        for (const { url: serverUrl, name } of servers) {
             try {
                 const response = await fetch(`${serverUrl}/api/voices`, {
                     method: 'GET',
                     signal: AbortSignal.timeout(3000),
                     headers: {
-                        'Date': new Date().toUTCString(),
-                        'Content-Type': 'application/json',
-                        'Accept': '*/*',
-                        'User-Agent': navigator.userAgent
+                        'Accept': 'application/json'
                     },
                     cache: 'no-cache',
                     mode: 'cors'
                 });
                 if (response.ok) {
                     this._serverAvailable = true;
-                    this.localServerUrl = serverUrl; // 使用可用的服务器地址
+                    this.localServerUrl = serverUrl;
                     this.currentProvider = 'edgetts';
-                    console.log('[TTS] 后端服务器可用:', serverUrl);
+                    console.log(`[TTS] ${name}可用:`, serverUrl);
                     return;
                 }
             } catch (e) {
-                console.log('[TTS] 服务器不可用:', serverUrl);
+                console.log(`[TTS] ${name}不可用:`, serverUrl, e.message);
             }
         }
+
+        // 所有服务器都不可用
         this._serverAvailable = false;
         console.log('[TTS] 所有后端服务器都不可用，使用浏览器原生语音');
     }
@@ -162,10 +168,7 @@ class TTSManager {
             const response = await fetch(`${this.localServerUrl}/api/voices`, {
                 method: 'GET',
                 headers: {
-                    'Date': new Date().toUTCString(),
-                    'Content-Type': 'application/json',
-                    'Accept': '*/*',
-                    'User-Agent': navigator.userAgent
+                    'Accept': 'application/json'
                 },
                 cache: 'no-cache',
                 mode: 'cors'
@@ -174,10 +177,10 @@ class TTSManager {
             const data = await response.json();
             if (data.voices && Array.isArray(data.voices) && data.voices.length > 0) {
                 const voices = data.voices.map(v => ({
-                    id: v.Name || v.ShortName,
-                    name: `${v.FriendlyName || v.DisplayName}（${v.Gender === 'Female' ? '女' : '男'}声）`,
-                    lang: v.Locale,
-                    gender: v.Gender === 'Female' ? '女' : '男'
+                    id: v.id || v.Name || v.ShortName,
+                    name: v.name || `${v.FriendlyName || v.DisplayName}（${v.Gender === 'Female' ? '女' : '男'}声）`,
+                    lang: v.lang || v.Locale || 'zh-CN',
+                    gender: v.gender || (v.Gender === 'Female' ? '女' : '男')
                 }));
                 voices.sort((a, b) => {
                     const aZH = a.lang.startsWith('zh-CN');
@@ -287,13 +290,13 @@ class TTSManager {
     /**
      * 朗读文本（用于预览）
      */
-    speak(text, options = {}) {
+    async speak(text, options = {}) {
         const { voice, rate = 1, pitch = 1, volume = 1 } = options;
 
         if (this.currentProvider === 'webspeech') {
             return this._speakWebSpeech(text, { voice, rate, pitch, volume });
         } else if (this.currentProvider === 'edgetts') {
-            return this._speakEdgeTTS(text, { voice, rate, pitch, volume });
+            return await this._speakEdgeTTS(text, { voice, rate, pitch, volume });
         } else if (this.currentProvider === 'azure') {
             return this._speakAzure(text, { voice, rate, pitch, volume });
         }
@@ -471,29 +474,14 @@ class TTSManager {
 
         const { voice = 'zh-CN-XiaoxiaoNeural', rate = 1, pitch = 1, volume = 1 } = options;
 
-        // 将 rate/pitch/volume 转换为 edge-tts 需要的字符串格式
-        // rate: +0%, volume: +0%, pitch: +0Hz (注意 pitch 必须是 Hz 单位)
         const rateStr = (rate === 1) ? '+0%' : (rate > 1 ? '+' : '') + Math.round((rate - 1) * 100) + '%';
         const volumeStr = (volume === 1) ? '+0%' : (volume > 1 ? '+' : '') + Math.round((volume - 1) * 100) + '%';
         const pitchStr = (pitch === 1) ? '+0Hz' : (pitch > 1 ? '+' : '') + Math.round((pitch - 1) * 50) + 'Hz';
 
-        // 优先尝试本地后端服务器
-        try {
-            console.log('[EdgeTTS] 尝试连接本地后端服务器...');
-            const audioBlob = await this._synthesizeViaLocalServer(text, voice, rateStr, pitchStr, volumeStr);
-            console.log('[EdgeTTS] 本地后端服务器成功，音频大小:', audioBlob.size, 'bytes');
-            return audioBlob;
-        } catch (localError) {
-            console.warn('[EdgeTTS] 本地后端服务器失败:', localError.message);
-            const errMsg = localError.message || '';
-            // 如果是音色不存在或参数错误，不回退到WebSocket，直接抛出（换连接方式也没用）
-            if (errMsg.includes('No audio was received') || errMsg.includes('未收到音频数据') || errMsg.includes('verify that your parameters are correct')) {
-                throw localError;
-            }
-            // 只有连接不上时才回退到WebSocket
-            console.log('[EdgeTTS] 回退到WebSocket直接连接方式...');
-            return await this._synthesizeViaWebSocket(text, voice, rateStr, pitchStr, volumeStr);
-        }
+        console.log('[EdgeTTS] 尝试连接后端服务器...');
+        const audioBlob = await this._synthesizeViaLocalServer(text, voice, rateStr, pitchStr, volumeStr);
+        console.log('[EdgeTTS] 后端服务器成功，音频大小:', audioBlob.size, 'bytes');
+        return audioBlob;
     }
 
     /**
@@ -503,35 +491,51 @@ class TTSManager {
     async _synthesizeViaLocalServer(text, voice, rateStr, pitchStr, volumeStr) {
         const url = `${this.localServerUrl}/api/tts`;
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Date': new Date().toUTCString(),
-                'Accept': '*/*',
-                'User-Agent': navigator.userAgent
-            },
-            body: JSON.stringify({
-                text: text,
-                voice: voice,
-                rate: rateStr,
-                pitch: pitchStr,
-                volume: volumeStr
-            }),
-            cache: 'no-cache',
-            mode: 'cors'
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        if (!response.ok) {
-            const errText = await response.text().catch(() => '未知错误');
-            if (response.status === 0 || response.status === 404) {
-                throw new Error('本地后端服务器未启动。请先运行: cd tts-server && npm install && npm start');
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Date': new Date().toUTCString(),
+                    'Accept': '*/*',
+                    'User-Agent': navigator.userAgent
+                },
+                body: JSON.stringify({
+                    text: text,
+                    voice: voice,
+                    rate: rateStr,
+                    pitch: pitchStr,
+                    volume: volumeStr
+                }),
+                cache: 'no-cache',
+                mode: 'cors',
+                signal: controller.signal
+            });
+
+            if (!response.ok) {
+                const errText = await response.text().catch(() => '未知错误');
+                if (response.status === 0 || response.status === 404) {
+                    throw new Error('本地后端服务器未启动。请先运行: cd tts-server && npm install && npm start');
+                }
+                if (response.status === 502 || response.status === 504) {
+                    throw new Error(`当前音色暂时不可用，请换一个音色试试`);
+                }
+                throw new Error(`后端服务器错误 (${response.status}): ${errText}`);
             }
-            throw new Error(`后端服务器错误 (${response.status}): ${errText}`);
-        }
 
-        const arrayBuffer = await response.arrayBuffer();
-        return new Blob([arrayBuffer], { type: 'audio/mpeg' });
+            const arrayBuffer = await response.arrayBuffer();
+            return new Blob([arrayBuffer], { type: 'audio/mpeg' });
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                throw new Error('请求超时，当前音色暂时不可用，请换一个音色试试');
+            }
+            throw err;
+        } finally {
+            clearTimeout(timeoutId);
+        }
     }
 
     /**
