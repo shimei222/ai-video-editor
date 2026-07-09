@@ -44,6 +44,11 @@ class TTSManager {
         this._loadVoicesFromServer();
     }
     
+    // 生成 RFC 1123 格式的 Date 头部
+    _getDateHeader() {
+        return new Date().toUTCString();
+    }
+
     // 检测后端服务器是否可用
     async _checkServerAvailable() {
         const servers = [this.localServerUrl, this.remoteServerUrl];
@@ -51,7 +56,10 @@ class TTSManager {
             try {
                 const response = await fetch(`${serverUrl}/api/voices`, {
                     method: 'GET',
-                    signal: AbortSignal.timeout(3000)
+                    signal: AbortSignal.timeout(3000),
+                    headers: {
+                        'Date': this._getDateHeader()
+                    }
                 });
                 if (response.ok) {
                     this._serverAvailable = true;
@@ -146,7 +154,11 @@ class TTSManager {
         if (this._voicesLoading) return;
         this._voicesLoading = true;
         try {
-            const response = await fetch(`${this.localServerUrl}/api/voices`);
+            const response = await fetch(`${this.localServerUrl}/api/voices`, {
+                headers: {
+                    'Date': this._getDateHeader()
+                }
+            });
             if (!response.ok) throw new Error('获取音色列表失败');
             const data = await response.json();
             if (data.voices && Array.isArray(data.voices) && data.voices.length > 0) {
@@ -483,7 +495,8 @@ class TTSManager {
         const response = await fetch(url, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Date': this._getDateHeader()
             },
             body: JSON.stringify({
                 text: text,
