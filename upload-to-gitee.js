@@ -11,7 +11,7 @@ const path = require('path');
 const CONFIG = {
     owner: 'ai-video-editor',      // 你的 Gitee 登录名
     repo: 'ai-video-editor',       // 仓库名
-    token: 'acf8c497e614ee041d3e5b05f823e4fa', // 私人令牌
+    token: '', // 私人令牌
     branch: 'master',              // 分支
     message: '上传网站代码'          // 提交信息
 };
