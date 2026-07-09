@@ -10,7 +10,7 @@ class TTSManager {
         // 后端服务器地址
         // 优先从环境变量读取，用于线上部署1111
         const envUrl = window.TTS_SERVER_URL || '';
-        this.localServerUrl = envUrl || 'https://web-tts-trigger-srwwkcpbhf.cn-hongkong.fcapp.run';
+        this.localServerUrl = envUrl || 'https://web-tts-trigger-srwwkcpbhf.cn-shanghai.fcapp.run';
         this.remoteServerUrl = this.localServerUrl;
         
         // 自动检测后端服务器是否可用
