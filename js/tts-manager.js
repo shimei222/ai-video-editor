@@ -8,10 +8,10 @@
 class TTSManager {
     constructor() {
         // 后端服务器地址
-        // 优先从环境变量读取，用于线上部署
+        // 优先从环境变量读取，用于线上部署1111
         const envUrl = window.TTS_SERVER_URL || '';
-        this.localServerUrl = envUrl || 'http://localhost:3000';
-        this.remoteServerUrl = 'https://ai-video-editor-tts.changyongxuyong.cn'; // 预留线上地址
+        this.localServerUrl = envUrl || 'https://tts-api-nfjqrzits.cn-hongkong.fcapp.run';
+        this.remoteServerUrl = this.localServerUrl;
         
         // 自动检测后端服务器是否可用
         this._serverAvailable = false;
