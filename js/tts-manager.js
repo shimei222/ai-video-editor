@@ -7,9 +7,11 @@
  */
 class TTSManager {
     constructor() {
-        // 本地后端服务器地址（需要先启动 tts-server）
-        // 如果部署到线上，可以改为线上服务器地址
-        this.localServerUrl = 'http://localhost:3000';
+        // 后端服务器地址
+        // 优先从环境变量读取，用于线上部署
+        const envUrl = window.TTS_SERVER_URL || '';
+        this.localServerUrl = envUrl || 'http://localhost:3000';
+        this.remoteServerUrl = 'https://ai-video-editor-tts.changyongxuyong.cn'; // 预留线上地址
         
         // 自动检测后端服务器是否可用
         this._serverAvailable = false;
@@ -44,20 +46,26 @@ class TTSManager {
     
     // 检测后端服务器是否可用
     async _checkServerAvailable() {
-        try {
-            const response = await fetch(`${this.localServerUrl}/api/voices`, {
-                method: 'GET',
-                signal: AbortSignal.timeout(3000) // 3秒超时
-            });
-            if (response.ok) {
-                this._serverAvailable = true;
-                this.currentProvider = 'edgetts'; // 后端可用时使用 Edge TTS
-                console.log('[TTS] 后端服务器可用，已切换到 Edge TTS');
+        const servers = [this.localServerUrl, this.remoteServerUrl];
+        for (const serverUrl of servers) {
+            try {
+                const response = await fetch(`${serverUrl}/api/voices`, {
+                    method: 'GET',
+                    signal: AbortSignal.timeout(3000)
+                });
+                if (response.ok) {
+                    this._serverAvailable = true;
+                    this.localServerUrl = serverUrl; // 使用可用的服务器地址
+                    this.currentProvider = 'edgetts';
+                    console.log('[TTS] 后端服务器可用:', serverUrl);
+                    return;
+                }
+            } catch (e) {
+                console.log('[TTS] 服务器不可用:', serverUrl);
             }
-        } catch (e) {
-            this._serverAvailable = false;
-            console.log('[TTS] 后端服务器不可用，使用浏览器原生语音');
         }
+        this._serverAvailable = false;
+        console.log('[TTS] 所有后端服务器都不可用，使用浏览器原生语音');
     }
 
     _loadFromStorage() {
