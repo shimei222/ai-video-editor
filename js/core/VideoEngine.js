@@ -1575,8 +1575,9 @@ class VideoEngine {
         let drawW, drawH;
         if (isText) {
             const uniformScale = this._getTextUniformScale(effects);
-            drawW = sourceW * uniformScale;
-            drawH = sourceH * uniformScale;
+            const scaleToFit = Math.min(canvasW / sourceW, canvasH / sourceH);
+            drawW = sourceW * scaleToFit * uniformScale;
+            drawH = sourceH * scaleToFit * uniformScale;
         } else {
             const scaleX = ((effects.scaleX !== undefined ? effects.scaleX : effects.scale) || 100) / 100;
             const scaleY = ((effects.scaleY !== undefined ? effects.scaleY : effects.scale) || 100) / 100;
@@ -1798,9 +1799,6 @@ class VideoEngine {
     }
     
     _startResizing(handle, startWorldX, startWorldY, clip) {
-        // 文本素材：先把非 100 的 scale 归一化到 fontSize/maxWidth
-        this._normalizeTextClipScale(clip);
-
         const effects = this._getInterpolatedEffects(clip);
         const bounds = this._getClipBounds(clip);
         const renderScale = this._getRenderScale();
@@ -1809,15 +1807,7 @@ class VideoEngine {
         const canvasH = bounds.canvasH;
         const scaleToFit = Math.min(canvasW / sourceSize.w, canvasH / sourceSize.h);
 
-        // 文本素材：记录原始 fontSize、maxWidth、lineHeight，以及当前显示尺寸/位置
         const isText = clip.material.type === 'text';
-        const origTextData = isText && clip.material.textData ? {
-            fontSize: clip.material.textData.fontSize || 96,
-            maxWidth: clip.material.textData.maxWidth || 1200,
-            lineHeight: clip.material.textData.lineHeight || 1.2,
-            sourceW: sourceSize.w,
-            sourceH: sourceSize.h
-        } : null;
 
         const handleMap = {
             nw: { x: bounds.x,              y: bounds.y },
@@ -1907,42 +1897,93 @@ class VideoEngine {
                 }
             }
 
-            if (isText && origTextData) {
-                const textData = clip.material.textData;
-                let targetW = Math.max(20, newW);
-                let targetH = Math.max(20, newH);
+            if (isText) {
+                const textData = clip.material.textData || {};
+                const paddingTotal = (textData.padding || 0) * 2;
 
                 if (isCorner) {
-                    const ratio = Math.max(targetW / origW, targetH / origH);
-                    targetW = origW * ratio;
-                    targetH = origH * ratio;
+                    // ===== 四角缩放 =====
+                    // 只改变显示大小（scale），不修改字号、排版参数
+                    // 用户拖动四角时，蓝框等比例放大/缩小，文字大小跟着变但字号不变
+                    const ratio = Math.max(newW / origW, newH / origH);
+                    const newScale = Math.max(10, Math.round(ratio * 100));
+                    
+                    clip.effects.scale = newScale;
+                    clip.effects.scaleX = newScale;
+                    clip.effects.scaleY = newScale;
 
-                    const r = targetW / origW;
-                    textData.fontSize = Math.max(8, Math.round(origTextData.fontSize * r));
-                    textData.maxWidth = Math.max(50, Math.round(origTextData.maxWidth * r));
-                } else {
-                    if (handle === 'w' || handle === 'e') {
-                        const paddingTotal = (textData.padding || 0) * 2;
-                        textData.maxWidth = Math.max(50, targetW - paddingTotal);
-                    } else if (handle === 'n' || handle === 's') {
-                        textData.lineHeight = Math.max(0.5, parseFloat(((targetH - (textData.padding || 0) * 2) / (textData.fontSize || 96)).toFixed(3)));
+                    const actualW = origW * (newScale / 100);
+                    const actualH = origH * (newScale / 100);
+
+                    let actualX = bounds.x;
+                    let actualY = bounds.y;
+                    if (handle === 'nw') {
+                        actualX = anchor.x - actualW;
+                        actualY = anchor.y - actualH;
+                    } else if (handle === 'ne') {
+                        actualX = anchor.x;
+                        actualY = anchor.y - actualH;
+                    } else if (handle === 'sw') {
+                        actualX = anchor.x - actualW;
+                        actualY = anchor.y;
+                    } else if (handle === 'se') {
+                        actualX = anchor.x;
+                        actualY = anchor.y;
                     }
+
+                    const newPosX = Math.round((actualX - (canvasW - actualW) / 2) / renderScale.x);
+                    const newPosY = Math.round((actualY - (canvasH - actualH) / 2) / renderScale.y);
+
+                    if (this.onClipTransform) {
+                        this.onClipTransform({
+                            clipId: clip.id,
+                            scale: newScale,
+                            scaleX: newScale,
+                            scaleY: newScale,
+                            posX: newPosX,
+                            posY: newPosY
+                        });
+                    }
+                    return;
                 }
 
-                textData.frameWidth = targetW;
-                textData.frameHeight = targetH;
+                // ===== 四边调整 =====
+                if (handle === 'w' || handle === 'e') {
+                    // 左右边：调整宽度 → 修改 maxWidth → 文字重新排版
+                    // 高度由 TextManager 根据新宽度自动计算，以宽度为基准
+                    textData.maxWidth = Math.max(50, newW - paddingTotal);
+                    
+                    // 清除缓存，让 TextManager 重新计算文本高度
+                    if (window.textManager) {
+                        window.textManager.invalidate(clip.material.id);
+                    }
 
-                if (window.textManager) {
-                    window.textManager.invalidate(clip.material.id);
+                    // 更新 frameWidth，frameHeight 由 TextManager 计算后再更新
+                    textData.frameWidth = newW;
+                } else if (handle === 'n' || handle === 's') {
+                    // 上下边：只调整高度，不修改字号和排版
+                    // 用户拖动上下边只是改变蓝框高度，文字排版不变
+                    textData.frameHeight = Math.max(20, newH);
                 }
 
+                // 四边调整时 scale 保持 100
                 const newScale = 100;
                 clip.effects.scale = newScale;
                 clip.effects.scaleX = newScale;
                 clip.effects.scaleY = newScale;
 
-                const actualW = targetW;
-                const actualH = targetH;
+                // 获取实际尺寸（可能已由 TextManager 更新）
+                let actualW = textData.frameWidth || newW;
+                let actualH = textData.frameHeight || newH;
+
+                // 重新获取 TextManager 计算的实际高度（以宽度为基准）
+                if (window.textManager && (handle === 'w' || handle === 'e')) {
+                    const cached = window.textManager.getOrCreateTextImage(clip.material);
+                    if (cached) {
+                        actualH = cached.height;
+                        textData.frameHeight = actualH;
+                    }
+                }
 
                 let actualX = bounds.x;
                 let actualY = bounds.y;
